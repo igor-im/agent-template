@@ -2,6 +2,8 @@ import os
 from datetime import datetime
 from typing import Literal
 
+from dotenv import load_dotenv
+
 import uvicorn
 from langchain_community.tools import DuckDuckGoSearchResults, OpenWeatherMapQueryRun
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -14,9 +16,11 @@ from langgraph.managed import IsLastStep
 from langgraph.prebuilt import ToolNode
 
 from agent.llama_guard import LlamaGuard, LlamaGuardOutput, SafetyAssessment
+from agent.prompt_lib import research_agent_prompt
 from agent.tools import calculator
+load_dotenv()
 
-base_path = "http://localhost:10550/v1"
+base_path = os.environ.get('OPENAI_API_BASE')
 model_name = os.environ.get('MODEL_NAME', 'gpt-4')
 os.environ['OPENAI_API_KEY'] = 'sk-OPENAI_API_KEY'
 
@@ -36,16 +40,6 @@ class AgentState(MessagesState, total=False):
 models: dict[str, BaseChatModel] = {}
 if os.getenv("OPENAI_API_KEY") is not None:
     models["gpt-4"] = ChatOpenAI(model="gpt-4", temperature=0.5, streaming=True, openai_api_base=base_path)
-# if os.getenv("GROQ_API_KEY") is not None:
-#     models["llama-3.1-70b"] = ChatGroq(model="llama-3.1-70b-versatile", temperature=0.5)
-# if os.getenv("GOOGLE_API_KEY") is not None:
-#     models["gemini-1.5-flash"] = ChatGoogleGenerativeAI(
-#         model="gemini-1.5-flash", temperature=0.5, streaming=True
-#     )
-# if os.getenv("ANTHROPIC_API_KEY") is not None:
-#     models["claude-3-haiku"] = ChatAnthropic(
-#         model="claude-3-haiku-20240307", temperature=0.5, streaming=True
-#     )
 
 if not models:
     print("No LLM available. Please set API keys to enable at least one LLM.")
@@ -53,28 +47,11 @@ if not models:
         print("FastAPI initialized failed. Please use Ctrl + C to exit uvicorn.")
     exit(1)
 
-
 web_search = DuckDuckGoSearchResults(name="WebSearch")
 tools = [web_search, calculator]
 
-# Add weather tool if API key is set
-# Register for an API key at https://openweathermap.org/api/
-if os.getenv("OPENWEATHERMAP_API_KEY") is not None:
-    tools.append(OpenWeatherMapQueryRun(name="Weather"))
-
 current_date = datetime.now().strftime("%B %d, %Y")
-instructions = f"""
-    You are a helpful research assistant with the ability to search the web and use other tools.
-    Today's date is {current_date}.
-
-    NOTE: THE USER CAN'T SEE THE TOOL RESPONSE.
-
-    A few things to remember:
-    - Please include markdown-formatted links to any citations used in your response. Only include one
-    or two citations per response unless more are needed. ONLY USE LINKS RETURNED BY THE TOOLS.
-    - Use calculator tool with numexpr to answer math questions. The user does not understand numexpr,
-      so for the final response, use human readable format - e.g. "300 * 200", not "(300 \\times 200)".
-    """
+instructions = str.format(research_agent_prompt, current_date=current_date)
 
 
 def wrap_model(model: BaseChatModel) -> RunnableSerializable[AgentState, AIMessage]:
@@ -174,9 +151,6 @@ research_assistant = agent.compile(
     checkpointer=MemorySaver(),
 )
 
-print('research assistant created')
-
-
 if __name__ == "__main__":
     import asyncio
     from uuid import uuid4
@@ -184,6 +158,7 @@ if __name__ == "__main__":
     from dotenv import load_dotenv
 
     load_dotenv()
+
 
     async def main() -> None:
         inputs = {"messages": [("user", "Find me a recipe for chocolate chip cookies")]}
@@ -201,5 +176,6 @@ if __name__ == "__main__":
         # pip install pygraphviz
         #
         # research_assistant.get_graph().draw_png("agent_diagram.png")
+
 
     asyncio.run(main())

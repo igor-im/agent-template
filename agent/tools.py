@@ -37,4 +37,5 @@ def calculator_func(expression: str) -> str:
 
 
 calculator: BaseTool = tool(calculator_func)
-calculator.name = "Calculator"
+
+
